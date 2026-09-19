@@ -1,0 +1,17 @@
+{
+  "name": "Control Remoto BLE Vehículos",
+  "short_name": "Carro BLE",
+  "description": "Control de vehículos ESP32 mediante Web Bluetooth",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#007BFF",
+  "orientation": "landscape",
+  "icons": [
+    {
+      "src": "https://flaticon.com",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

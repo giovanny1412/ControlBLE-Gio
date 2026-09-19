@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Control BLE Carro</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    body {
+      background-color: #121212;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+    header {
+      margin-bottom: 10px;
+    }
+    .btn {
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      padding: 20px 40px;
+      font-size: 1.5rem;
+      font-weight: bold;
+      border-radius: 12px;
+      margin: 5px;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    .btn:active { background-color: #0056b3; }
+    .btn-connect { background-color: #28a745; margin-bottom: 20px; }
+    .btn-connect.connected { background-color: #dc3545; }
+    .control-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 100px);
+      grid-template-rows: repeat(3, 100px);
+      gap: 10px;
+      justify-content: center;
+    }
+    .btn-nav { font-size: 2rem; padding: 0; }
+    #status { color: #aaa; margin-top: 10px; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <button id="connectBtn" class="btn btn-connect">Conectar Carro</button>
+  </header>
+
+  <!-- Control de dirección estilo cruceta -->
+  <div class="control-grid">
+    <div></div>
+    <button class="btn btn-nav" ontouchstart="sendCmd('F')" ontouchend="sendCmd('S')" mousedown="sendCmd('F')" mouseup="sendCmd('S')">▲</button>
+    <div></div>
+    
+    <button class="btn btn-nav" ontouchstart="sendCmd('L')" ontouchend="sendCmd('S')" mousedown="sendCmd('L')" mouseup="sendCmd('S')">◀</button>
+    <button class="btn btn-nav" style="background-color:#444;" onclick="sendCmd('S')">🛑</button>
+    <button class="btn btn-nav" ontouchstart="sendCmd('R')" ontouchend="sendCmd('S')" mousedown="sendCmd('R')" mouseup="sendCmd('S')">▶</button>
+    
+    <div></div>
+    <button class="btn btn-nav" ontouchstart="sendCmd('B')" ontouchend="sendCmd('S')" mousedown="sendCmd('B')" mouseup="sendCmd('S')">▼</button>
+    <div></div>
+  </div>
+
+  <div id="status">Desconectado</div>
+
+  <script>
+    // Registro del Service Worker para funcionamiento Offline
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js');
+    }
+
+    // UUIDs Estándar BLE para emulación de puerto Serie (Nordic UART Service)
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e"; 
+    const TX_CHARACTERISTIC_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; 
+
+    let deviceBLE = null;
+    let txCharacteristic = null;
+
+    const connectBtn = document.getElementById('connectBtn');
+    const statusText = document.getElementById('status');
+
+    connectBtn.addEventListener('click', async () => {
+      if (deviceBLE && deviceBLE.gatt.connected) {
+        deviceBLE.gatt.disconnect();
+        return;
+      }
+
+      try {
+        statusText.innerText = "Buscando carro...";
+        deviceBLE = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: 'ESP32_CAR' }],
+          optionalServices: [SERVICE_UUID]
+        });
+
+        statusText.innerText = "Conectando al servidor...";
+        const server = await deviceBLE.gatt.connect();
+        
+        statusText.innerText = "Obteniendo servicios...";
+        const service = await server.getPrimaryService(SERVICE_UUID);
+        txCharacteristic = await service.getCharacteristic(TX_CHARACTERISTIC_UUID);
+
+        statusText.innerText = "¡Carro Conectado!";
+        connectBtn.innerText = "Desconectar";
+        connectBtn.classList.add('connected');
+
+        deviceBLE.addEventListener('gattserverdisconnected', onDisconnected);
+      } catch (error) {
+        console.error(error);
+        statusText.innerText = "Error de conexión";
+      }
+    });
+
+    function onDisconnected() {
+      statusText.innerText = "Desconectado";
+      connectBtn.innerText = "Conectar Carro";
+      connectBtn.classList.remove('connected');
+      txCharacteristic = null;
+    }
+
+    // Función que envía los caracteres correspondientes
+    async function sendCmd(command) {
+      if (!txCharacteristic) return;
+      try {
+        let encoder = new TextEncoder();
+        await txCharacteristic.writeValue(encoder.encode(command));
+        console.log("Enviado: " + command);
+      } catch (error) {
+        console.error("Error enviando comando: ", error);
+      }
+    }
+  </script>
+</body>
+</html>
