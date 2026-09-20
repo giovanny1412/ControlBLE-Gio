@@ -1,4 +1,4 @@
-const CACHE_NAME = 'control-ble-v1';
+const CACHE_NAME = 'control-ble-v2';
 const ASSETS = [
   './',
   './index.html',
