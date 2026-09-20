@@ -143,6 +143,8 @@
       connectBtn.classList.remove('connected');
       txCharacteristic = null;
       currentDir = null;
+      clearInterval(repeatIntervalId);
+      repeatIntervalId = null;
       dirButtons.forEach(b => b.classList.remove('pressed'));
     }
 
@@ -163,15 +165,27 @@
     // preventDefault() y evitar que un mismo toque dispare el comando dos veces
     // (una por el evento touch y otra por el evento mouse "fantasma" que generan
     // los navegadores móviles después de un touch).
+    let repeatIntervalId = null;
+
     function press(dir, btn) {
       currentDir = dir;
       btn.classList.add('pressed');
       sendCmd(dir);
+      // El ESP32 tiene un watchdog de seguridad que detiene los motores si no
+      // recibe una escritura BLE nueva en 500ms (para frenar el carro solo si
+      // se pierde la conexión). Como este botón solo envía el comando UNA VEZ
+      // al presionarlo, reenviamos el mismo comando cada 200ms mientras se
+      // mantenga presionado, para que el watchdog no lo confunda con una
+      // desconexión mientras seguís sosteniendo el botón.
+      clearInterval(repeatIntervalId);
+      repeatIntervalId = setInterval(() => sendCmd(dir), 200);
     }
 
     function release(btn) {
       if (currentDir === null) return;
       currentDir = null;
+      clearInterval(repeatIntervalId);
+      repeatIntervalId = null;
       btn.classList.remove('pressed');
       sendCmd('S');
     }
@@ -193,6 +207,8 @@
 
     stopBtn.addEventListener('click', () => {
       currentDir = null;
+      clearInterval(repeatIntervalId);
+      repeatIntervalId = null;
       dirButtons.forEach(b => b.classList.remove('pressed'));
       sendCmd('S');
     });
