@@ -4,8 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Control BLE Carro</title>
-  <!-- Favicon integrado en Base64 para eliminar el error 404 de la consola -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏎️</text></svg>">
   <link rel="manifest" href="manifest.json">
   <style>
     * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -24,7 +22,9 @@
       user-select: none;
       touch-action: none;
     }
-    header { margin-bottom: 10px; }
+    header {
+      margin-bottom: 10px;
+    }
     .btn {
       background-color: #007BFF;
       color: white;
@@ -37,7 +37,8 @@
       cursor: pointer;
       touch-action: none;
     }
-    .btn:active, .btn.pressed { background-color: #0056b3; }
+    .btn:active { background-color: #0056b3; }
+    .btn.pressed { background-color: #0056b3; }
     .btn-connect { background-color: #28a745; margin-bottom: 20px; }
     .btn-connect.connected { background-color: #dc3545; }
     .control-grid {
@@ -48,7 +49,7 @@
       justify-content: center;
     }
     .btn-nav { font-size: 2rem; padding: 0; touch-action: none; }
-    #status { color: #aaa; margin-top: 10px; font-size: 0.9rem; text-align: center; }
+    #status { color: #aaa; margin-top: 10px; font-size: 0.9rem; }
   </style>
 </head>
 <body>
@@ -75,21 +76,25 @@
   <div id="status">Desconectado</div>
 
   <script>
+    // Registro del Service Worker para funcionamiento Offline
+    // (requiere que el sitio se sirva por HTTPS o localhost)
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js').catch(function (err) {
         console.error('No se pudo registrar el service worker:', err);
       });
     }
 
-    // Parámetros exactos tomados de tu script MicroPython
-    const BLE_DEVICE_NAME = 'ESP32-BLE';
-    const SERVICE_UUID = 0x181A;
-    const TX_CHARACTERISTIC_UUID = 0x2A6E;
+    // ⚠️ IMPORTANTE: estos valores DEBEN coincidir exactamente con los bloques
+    // "Inicializar BLE como", "Crear servicio BLE UUID" y "Crear característica UUID"
+    // que configuraste en el editor de bloques del ESP32. Si cambias uno de un lado,
+    // cambia el otro también.
+    const BLE_DEVICE_NAME_PREFIX = 'ESP32-BLE'; // debe ser el mismo nombre del bloque "Inicializar BLE como"
+    const SERVICE_UUID = 0x181A;                // debe ser el mismo UUID del bloque "Crear servicio BLE"
+    const TX_CHARACTERISTIC_UUID = 0x2A6E;      // debe ser el mismo UUID del bloque "Crear característica"
 
     let deviceBLE = null;
     let txCharacteristic = null;
-    let currentDir = null;
-    let sendInterval = null; // Bucle para mantener activo el ESP32 (< 500ms)
+    let currentDir = null; // dirección actualmente presionada, para no reenviar de más
 
     const connectBtn = document.getElementById('connectBtn');
     const statusText = document.getElementById('status');
@@ -103,26 +108,22 @@
       }
 
       if (!navigator.bluetooth) {
-        statusText.innerText = 'Navegador no compatible con Web Bluetooth (usa Chrome/Edge sobre HTTPS).';
+        statusText.innerText = 'Este navegador no soporta Web Bluetooth (usa Chrome/Edge, y HTTPS o localhost).';
         return;
       }
 
       try {
         statusText.innerText = 'Buscando carro...';
-        
-        // Filtramos por el nombre exacto 'ESP32-BLE'
         deviceBLE = await navigator.bluetooth.requestDevice({
-          filters: [{ name: BLE_DEVICE_NAME }],
+          filters: [{ namePrefix: BLE_DEVICE_NAME_PREFIX }],
           optionalServices: [SERVICE_UUID]
         });
 
-        statusText.innerText = 'Conectando al servidor GATT...';
+        statusText.innerText = 'Conectando al servidor...';
         const server = await deviceBLE.gatt.connect();
 
-        statusText.innerText = 'Obteniendo servicio...';
+        statusText.innerText = 'Obteniendo servicios...';
         const service = await server.getPrimaryService(SERVICE_UUID);
-
-        statusText.innerText = 'Obteniendo característica...';
         txCharacteristic = await service.getCharacteristic(TX_CHARACTERISTIC_UUID);
 
         statusText.innerText = '¡Carro Conectado!';
@@ -132,7 +133,7 @@
         deviceBLE.addEventListener('gattserverdisconnected', onDisconnected);
       } catch (error) {
         console.error(error);
-        statusText.innerText = 'Error: ' + error.message;
+        statusText.innerText = 'Error de conexión: ' + error.message;
       }
     });
 
@@ -141,48 +142,38 @@
       connectBtn.innerText = 'Conectar Carro';
       connectBtn.classList.remove('connected');
       txCharacteristic = null;
-      stopLoop();
+      currentDir = null;
       dirButtons.forEach(b => b.classList.remove('pressed'));
     }
 
+    // Función que envía los caracteres correspondientes
     async function sendCmd(command) {
       if (!txCharacteristic) return;
       try {
         const encoder = new TextEncoder();
         await txCharacteristic.writeValue(encoder.encode(command));
+        console.log('Enviado: ' + command);
       } catch (error) {
-        console.error('Error enviando comando:', error);
+        console.error('Error enviando comando: ', error);
       }
     }
 
-    // Bucle para enviar el comando cada 150ms y vencer el timeout de 500ms de MicroPython
-    function startLoop(dir) {
-      if (sendInterval) clearInterval(sendInterval);
-      sendCmd(dir); // Envío inmediato
-      sendInterval = setInterval(() => {
-        sendCmd(dir);
-      }, 150);
-    }
-
-    function stopLoop() {
-      if (sendInterval) {
-        clearInterval(sendInterval);
-        sendInterval = null;
-      }
-      currentDir = null;
-      sendCmd('S'); // Enviar Stop inmediatamente
-    }
-
+    // ---- Manejo de botones de dirección ----
+    // Usamos addEventListener (en vez de atributos inline) para poder llamar
+    // preventDefault() y evitar que un mismo toque dispare el comando dos veces
+    // (una por el evento touch y otra por el evento mouse "fantasma" que generan
+    // los navegadores móviles después de un touch).
     function press(dir, btn) {
       currentDir = dir;
       btn.classList.add('pressed');
-      startLoop(dir);
+      sendCmd(dir);
     }
 
     function release(btn) {
       if (currentDir === null) return;
+      currentDir = null;
       btn.classList.remove('pressed');
-      stopLoop();
+      sendCmd('S');
     }
 
     dirButtons.forEach(btn => {
@@ -190,16 +181,20 @@
 
       btn.addEventListener('touchstart', (e) => { e.preventDefault(); press(dir, btn); }, { passive: false });
       btn.addEventListener('touchend', (e) => { e.preventDefault(); release(btn); }, { passive: false });
+      // Si el dedo se desliza fuera del botón o el sistema cancela el toque
+      // (llamada entrante, notificación, etc.), igual detenemos el carro.
       btn.addEventListener('touchcancel', (e) => { e.preventDefault(); release(btn); }, { passive: false });
 
       btn.addEventListener('mousedown', () => press(dir, btn));
       btn.addEventListener('mouseup', () => release(btn));
+      // Si se suelta el mouse fuera del botón (arrastrando), igual detenemos.
       btn.addEventListener('mouseleave', () => release(btn));
     });
 
     stopBtn.addEventListener('click', () => {
+      currentDir = null;
       dirButtons.forEach(b => b.classList.remove('pressed'));
-      stopLoop();
+      sendCmd('S');
     });
   </script>
 </body>
